@@ -1,336 +1,367 @@
-# Geopolitical Knowledge Graph Intelligence Agent - PRODUCTION VERSION 2.0
+# Geopolitical Knowledge Graph Intelligence Agent — PRODUCTION VERSION 2.0
 
-## Overview
-
-This is a **production-grade multi-agent system** that analyzes geopolitical events and their impact on companies using **REAL APIs ONLY**. No hardcoded data.
+A multi-agent system that analyzes geopolitical events and their impact on companies using real APIs. Extracts entities, performs sentiment analysis, builds a knowledge graph, and identifies impact pathways.
 
 ```
-Input: Company Ticker (e.g., NVIDIA)
-           ↓
-      News Agent (Real APIs)
-           ↓
-      Event Agent (NER + Sentiment)
-           ↓
-      Knowledge Graph Agent
-           ↓
-Output: Impact Pathways & Relationships
+         Input: Stock Ticker (e.g. NVIDIA)
+                    │
+                    ▼
+    ┌───────────────────────────────┐
+    │  News Agent                   │
+    │  NewsAPI + GDELT + ACLED      │  → state["news"]
+    └───────────────┬───────────────┘
+                    │
+                    ▼
+    ┌───────────────────────────────┐
+    │  Event Agent                  │
+    │  spaCy NER + TextBlob         │  → state["entities"]
+    └───────────────┬───────────────┘
+                    │
+                    ▼
+    ┌───────────────────────────────┐
+    │  Knowledge Graph Agent        │
+    │  NetworkX graph builder       │  → state["graph_nodes"]
+    │                               │    state["graph_edges"]
+    └───────────────┬───────────────┘
+                    │
+                    ▼
+    ┌───────────────────────────────┐
+    │  Impact Analysis              │
+    │  Pathway detection            │  → state["messages"]
+    └───────────────┬───────────────┘
+                    │
+                    ▼
+         Output: Graph + Impact Pathways
 ```
 
 ---
 
-## Required API Keys (Get Them Free!)
+## Table of Contents
 
-### 1. **NewsAPI** (Primary News Source) - FREE
-- **Why**: Real-time news aggregation across 50,000+ sources
-- **Get key**: https://newsapi.org/register
-- **Free tier**: 1,000 requests/day (more than enough)
-- **Cost**: Free forever for up to 1,000/day
-
-### 2. **GDELT** (Geopolitical Events Database) - FREE
-- **Why**: 15+ years of global events data
-- **Get key**: No key needed! Free public API
-- **Endpoint**: https://api.gdeltproject.org/api/v2/search/tv
-- **Cost**: 100% FREE
-
-### 3. **ACLED** (Armed Conflicts Data) - FREE
-- **Why**: Armed conflicts and political violence tracking
-- **Get key**: No key needed! Free public API
-- **Endpoint**: https://api.acleddata.com
-- **Cost**: 100% FREE
+1. [Database Schema (Data Models)](#1-database-schema-data-models)
+2. [Backend Connections (APIs & Services)](#2-backend-connections-apis--services)
+3. [Setup Instructions](#3-setup-instructions)
+4. [Usage](#4-usage)
+5. [Architecture](#5-architecture)
+6. [Deployment](#6-deployment)
+7. [Testing](#7-testing)
+8. [Error Handling](#8-error-handling)
+9. [Project Structure](#9-project-structure)
 
 ---
 
-## Setup Instructions
+## 1. Database Schema (Data Models)
 
-### Step 1: Clone & Navigate
-```bash
-cd c:\Knowledge_graph_agent
+All data flows through the agent as **in-memory TypedDicts** defined in `graph/state.py`. Every agent reads from and writes to these schemas.
+
+### AgentState — The Main Container
+
+This is the single object passed through the entire workflow. Every agent reads from it and returns an updated copy.
+
+| Field | Type | Required | Description | Written By |
+|---|---|---|---|---|
+| `stock` | `str` | **Yes** | Company ticker (e.g. `NVIDIA`, `TSMC`) | User input |
+| `news` | `list<NewsArticle>` | No | Geopolitical news articles | News Agent |
+| `entities` | `list<Entity>` | No | Named entities with sentiment | Event Agent |
+| `graph_nodes` | `list<GraphNode>` | No | Knowledge graph nodes | KG Agent |
+| `graph_edges` | `list<GraphEdge>` | No | Knowledge graph relationships | KG Agent |
+| `messages` | `list<str>` | No | Workflow audit trail | All agents |
+
+### NewsArticle — A Single News Item
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `title` | `str` | **Yes** | Headline |
+| `content` | `str` | **Yes** | Body or description |
+| `source` | `str` | No | Publisher name (e.g. `Reuters`) |
+| `date` | `str` | No | Publication date |
+| `url` | `str` | No | Link to original article |
+
+### Entity — A Named Entity with Sentiment
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `entity` | `str` | **Yes** | Extracted entity name (e.g. `China`) |
+| `type` | `str` | **Yes** | NER label: `GPE`, `ORG`, `PERSON`, `PRODUCT`, `EVENT`, `FAC`, `LOC` |
+| `sentiment` | `str` | No | `Positive`, `Negative`, or `Neutral` |
+
+### GraphNode — A Vertex in the Knowledge Graph
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | `str` | **Yes** | Unique ID (e.g. `NVIDIA`) |
+| `label` | `str` | **Yes** | Display name |
+| `node_type` | `str` | **Yes** | `Company`, `Country`, `Organization`, `Product`, `Facility`, `Individual`, `Event`, `Location`, `Entity` |
+| `properties` | `dict` | No | Extra metadata (key-value pairs) |
+
+### GraphEdge — A Relationship Between Two Nodes
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | `str` | **Yes** | Source node ID |
+| `target` | `str` | **Yes** | Target node ID |
+| `relationship` | `str` | **Yes** | `affects`, `interacts_with`, `produces`, `located_in`, `involves`, `impacted_by`, `related_to` (plus inverse forms suffixed `_by`) |
+| `weight` | `float` | No | Edge weight (default `1.0`) |
+| `properties` | `dict` | No | Extra metadata |
+
+### Neo4j Schema (Planned Migration)
+
+When the graph is migrated to persistent storage:
+
+```
+(:Company {id, label, ticker})
+(:Country  {id, label, region})
+(:Organization {id, label, type})
+(:Product  {id, label, category})
+
+(:Country)-[:AFFECTS]->(:Company)
+(:Company)-[:PRODUCES]->(:Product)
+(:Organization)-[:INTERACTS_WITH]->(:Company)
+(:Event)-[:IMPACTED_BY]->(:Company)
 ```
 
-### Step 2: Get API Keys
-1. **NewsAPI**: Go to https://newsapi.org/register → Copy your key
-2. **GDELT**: No key needed (free public API)
-3. **ACLED**: No key needed (free public API)
+---
 
-### Step 3: Configure `.env`
+## 2. Backend Connections (APIs & Services)
+
+### 2.1 External News APIs
+
+| API | URL | Auth | Rate Limit | On Failure |
+|---|---|---|---|---|
+| **NewsAPI** | `https://newsapi.org/v2/everything` | `NEWSAPI_KEY` | 1,000 req/day free | Blocks workflow |
+| **GDELT** | `https://api.gdeltproject.org/api/v2/search/tv` | None | 100+ req/hour | Logged, continues |
+| **ACLED** | `https://api.acleddata.com/api/add-specific-filters` | None | 10 req/min | Silent, continues |
+
+All three are called via `APIClient` in `agents/news_agent.py` which implements:
+- Retry logic — 3 attempts with exponential backoff
+- Timeout handling — configurable via `REQUEST_TIMEOUT` (default 30s)
+- HTTP error handling — 401 (bad key), 429 (rate limited), 5xx (server error)
+
+### 2.2 Optional Backend Services
+
+| Service | Env Variable | Purpose |
+|---|---|---|
+| Finnhub | `FINNHUB_API_KEY` | Financial market data |
+| Alpha Vantage | `ALPHA_VANTAGE_API_KEY` | Stock market data |
+| OpenAI | `OPENAI_API_KEY` | LLM reasoning (future) |
+| Claude | `CLAUDE_API_KEY` | LLM reasoning (future) |
+| Neo4j | `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` | Persistent graph DB (future) |
+
+### 2.3 Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `NEWSAPI_KEY` | **Yes** | — | NewsAPI key (get from https://newsapi.org/register) |
+| `GDELT_BASE_URL` | No | `https://api.gdeltproject.org/api/v2/search/tv` | GDELT API endpoint |
+| `REQUEST_TIMEOUT` | No | `30` | HTTP request timeout (seconds) |
+| `MAX_RETRIES` | No | `3` | API retry attempts |
+| `MAX_ARTICLES_PER_SOURCE` | No | `50` | Max articles per API |
+| `LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+---
+
+## 3. Setup Instructions
+
+### Prerequisites
+- Python 3.11+
+- [NewsAPI key](https://newsapi.org/register) (free)
+
+### Quick Start
+
 ```bash
-# Copy the template
+# 1. Clone
+git clone https://github.com/MarketAtlasX/knowledge-graph-agent.git
+cd knowledge-graph-agent
+
+# 2. Create virtual environment
+python -m venv venv
+.\venv\Scripts\Activate.ps1    # Windows
+source venv/bin/activate        # Linux / macOS
+
+# 3. Install dependencies
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+
+# 4. Configure environment
 copy .env.prod .env
+# Edit .env — set NEWSAPI_KEY=your_actual_key
 
-# Edit .env and add your keys:
-NEWSAPI_KEY=your_newsapi_key_here
-
-# Optional but recommended:
-FINNHUB_API_KEY=your_finnhub_key_here
-ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key_here
-```
-
-### Step 4: Verify Installation
-```bash
-# Activate venv
-.\venv\Scripts\Activate.ps1
-
-# Run test to verify APIs work
-python -m pytest tests/test_production_api.py -v
+# 5. Verify
+python -m pytest tests/ -v
 ```
 
 ---
 
-## Usage
+## 4. Usage
 
-### Run the Agent
+### CLI
+
 ```bash
-# For NVIDIA
 python main.py --stock NVIDIA
-
-# For TSMC
-python main.py --stock TSMC
-
-# Export to JSON
-python main.py --stock NVIDIA --export results.json
+python main.py --stock TSMC --export results.json
 ```
 
-### Programmatic Usage
+### Programmatic
+
 ```python
 from main import run_agent
 
 result = run_agent("NVIDIA")
 
-# Access data
-print(f"Found {len(result['news'])} news articles")
-print(f"Extracted {len(result['entities'])} entities")
-print(f"Built graph with {len(result['graph_nodes'])} nodes")
-print(f"Created {len(result['graph_edges'])} relationships")
+print(f"News articles:  {len(result['news'])}")
+print(f"Entities:       {len(result['entities'])}")
+print(f"Graph nodes:    {len(result['graph_nodes'])}")
+print(f"Relationships:  {len(result['graph_edges'])}")
 ```
 
 ---
 
-## Architecture
+## 5. Architecture
 
 ### Agents
 
-#### 1. **News Agent** (`agents/news_agent.py`)
-- **Fetches from**: NewsAPI + GDELT + ACLED
-- **Output**: List of news articles
-- **Features**: 
-  - Retry logic with exponential backoff
-  - Deduplication by URL
-  - Rate limiting
-  - Error handling
+| Agent | File | Input | Output | Technology |
+|---|---|---|---|---|
+| News Agent | `agents/news_agent.py` | Stock ticker | `list<NewsArticle>` | NewsAPI, GDELT, ACLED, `requests` |
+| Event Agent | `agents/event_agent.py` | `list<NewsArticle>` | `list<Entity>` | spaCy NER, TextBlob sentiment |
+| KG Agent | `agents/kg_agent.py` | `list<Entity>` | `list<GraphNode>` + `list<GraphEdge>` | NetworkX |
 
-```python
-fetch_news(state) → state["news"] = [NewsArticle]
+### Workflow
+
+Defined in `graph/workflow.py` using LangGraph's `StateGraph`:
+
 ```
-
-#### 2. **Event Agent** (`agents/event_agent.py`)
-- **Process**: NER extraction + sentiment analysis
-- **Output**: Structured entities with sentiment
-- **Features**:
-  - spaCy-based NER (GPE, ORG, PRODUCT, etc.)
-  - TextBlob sentiment analysis
-  - Entity deduplication
-
-```python
-process_event_intelligence(state) → state["entities"] = [Entity]
-```
-
-#### 3. **Knowledge Graph Agent** (`agents/kg_agent.py`)
-- **Build**: NetworkX graph from entities
-- **Output**: Nodes and edges
-- **Features**:
-  - Relationship mapping
-  - Impact pathway analysis
-  - Graph visualization-ready
-
-```python
-build_knowledge_graph(state) → state["graph_nodes"], state["graph_edges"]
-```
-
-### Workflow (`graph/workflow.py`)
-```
-NEWS → EVENTS → KG → IMPACT ANALYSIS → END
+news_agent → event_agent → kg_agent → impact_analysis → END
 ```
 
 ---
 
-## API Details
+## 6. Deployment
 
-### NewsAPI Response
-```json
-{
-  "status": "ok",
-  "articles": [
-    {
-      "title": "China imposes sanctions...",
-      "description": "New restrictions on semiconductors...",
-      "source": {"name": "Reuters"},
-      "publishedAt": "2026-06-01T10:00:00Z",
-      "url": "https://reuters.com/...",
-      "content": "Full article text..."
-    }
-  ]
-}
-```
+### Local
 
-### GDELT Response
-```json
-{
-  "articles": [
-    {
-      "title": "Geopolitical event",
-      "snippet": "Event description",
-      "sourceurl": "http://source.com",
-      "pubdate": "2026-06-01"
-    }
-  ]
-}
-```
-
-### ACLED Response
-```json
-{
-  "data": [
-    {
-      "event_type": "Strategic developments",
-      "country": "China",
-      "event_date": "2026-06-01",
-      "notes": "Event details",
-      "url": "http://acled.com/..."
-    }
-  ]
-}
-```
-
----
-
-## Testing
-
-### Run All Tests
 ```bash
-# Production API tests (mocked)
-python -m pytest tests/test_production_api.py -v
+python main.py --stock NVIDIA --export output.json
+```
 
-# Original tests
+### Docker
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt && python -m spacy download en_core_web_sm
+COPY . .
+ENTRYPOINT ["python", "main.py"]
+```
+
+```bash
+docker build -t kg-agent .
+docker run -e NEWSAPI_KEY=your_key kg-agent --stock TSMC
+```
+
+### GitHub Actions CI/CD
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -r requirements.txt
+      - run: python -m spacy download en_core_web_sm
+      - run: python -m pytest tests/ -v --cov=agents --cov=graph
+```
+
+### Cloud Options
+
+| Platform | Method |
+|---|---|
+| AWS Lambda | Package as Lambda function + API Gateway trigger |
+| Google Cloud Run | Deploy Docker image, set env vars, expose HTTP |
+| Azure Container Instances | `az container create --image kg-agent --env NEWSAPI_KEY=...` |
+
+### Production Checklist
+
+- [ ] Set `LOG_LEVEL=WARNING` in production
+- [ ] Use a secret manager (not `.env`) for API keys
+- [ ] Configure health checks and log aggregation
+- [ ] Add process manager (supervisor / systemd) for long-running instances
+- [ ] Implement Neo4j for persistent graph storage
+
+---
+
+## 7. Testing
+
+```bash
+# Unit tests
 python -m pytest tests/test_agents.py -v
 
-# Coverage report
+# Mocked API tests
+python -m pytest tests/test_production_api.py -v
+
+# Coverage
 python -m pytest --cov=agents --cov=graph tests/
 ```
 
-### Test Coverage
-```
-✅ NewsAgent with API mocking
-✅ Event Agent (NER + Sentiment)
-✅ KG Agent (Graph Building)
-✅ End-to-End Workflow
-✅ Error Handling & Retries
-✅ API Client Robustness
-```
+### Test Coverage Areas
+- NewsAgent: article fetching, deduplication, error handling
+- Event Agent: NER extraction, sentiment analysis
+- KG Agent: graph building, relationship creation, impact analysis
+- Workflow: end-to-end pipeline, data flow, multi-company runs
+- API Client: timeout retries, connection errors, auth errors
 
 ---
 
-## Configuration Options
+## 8. Error Handling
 
-### `.env` Variables
-```env
-# Required
-NEWSAPI_KEY=your_key_here
-
-# Optional APIs
-FINNHUB_API_KEY=your_key_here
-ALPHA_VANTAGE_API_KEY=your_key_here
-
-# Configuration
-LOG_LEVEL=INFO
-REQUEST_TIMEOUT=30
-MAX_RETRIES=3
-MAX_ARTICLES_PER_SOURCE=50
-```
-
-### Rate Limiting
-- **NewsAPI**: 1,000 requests/day (free tier)
-- **GDELT**: 100+ requests/hour
-- **ACLED**: 10 requests/minute
+| Error | Cause | Handling |
+|---|---|---|
+| `NEWSAPI_KEY not set` | Missing API key in `.env` | Raises `NewsAPIError` with fix instructions |
+| `API rate limit exceeded` | Exceeded free tier | Retries 3 times, then raises error |
+| `Connection timeout` | Network issue | Automatic retry (3 attempts) |
+| `Invalid API key` | 401 from NewsAPI | Helpful error message pointing to `.env` |
+| No articles found | All APIs returned empty | Raises error combining per-API failure messages |
+| Missing stock ticker | Empty `stock` field | Raises `ValueError` |
+| No news in state | Event agent called before news agent | Raises `ValueError` |
+| ACLED failure | Optional API down | Silently continues (does not block workflow) |
 
 ---
 
-## Error Handling
-
-### Common Issues
-
-1. **`NEWSAPI_KEY not set`**
-   - Solution: Add key to `.env` from https://newsapi.org
-
-2. **`API rate limit exceeded`**
-   - Solution: Wait 24 hours or upgrade API plan
-
-3. **`Connection timeout`**
-   - Solution: System retries automatically (3 attempts)
-
-4. **`Invalid API key`**
-   - Solution: Check .env for typos
-
----
-
-## Performance
-
-### Typical Response Times
-- **News fetch**: 2-5 seconds
-- **Entity extraction**: 1-2 seconds
-- **Graph building**: <1 second
-- **Total workflow**: 4-8 seconds
-
-### API Limits
-```
-NewsAPI:  1,000 req/day (free)
-GDELT:    Unlimited
-ACLED:    Unlimited
-```
-
----
-
-## Example Output
+## 9. Project Structure
 
 ```
-================================================================================
-GEOPOLITICAL KNOWLEDGE GRAPH ANALYSIS: NVIDIA
-================================================================================
-
-📋 WORKFLOW MESSAGES:
-  [NEWS_AGENT] Fetched 15 articles from real APIs (NewsAPI, GDELT, ACLED)
-  [EVENT_AGENT] Extracted 8 entities with sentiment analysis
-  [KG_AGENT] Built graph with 9 nodes and 16 edges
-  [KG_AGENT] Identified 6 potential impact pathways to NVIDIA
-
-📰 NEWS ARTICLES (15 found):
-  1. China imposes export restrictions on semiconductors
-     Source: Reuters | 2026-06-01
-  2. Taiwan-US semiconductor partnership announced
-     Source: Bloomberg | 2026-06-01
-
-🏷️  EXTRACTED ENTITIES (8 found):
-  • China (GPE) - Negative
-  • Taiwan (GPE) - Neutral
-  • Semiconductors (PRODUCT) - Negative
-  • US Government (ORG) - Positive
-
-🔵 GRAPH NODES (9 found):
-  • NVIDIA - Type: Company
-  • China - Type: Country
-  • Taiwan - Type: Country
-
-🔗 RELATIONSHIPS (16 found):
-  • China --[affects]--> NVIDIA
-  • Taiwan --[affects]--> NVIDIA
-  • Semiconductors --[produced_by]--> NVIDIA
+Knowledge_graph_agent/
+├── agents/
+│   ├── __init__.py          # Agent function exports
+│   ├── news_agent.py        # NewsAPI + GDELT + ACLED fetcher
+│   ├── event_agent.py       # spaCy NER + TextBlob sentiment
+│   └── kg_agent.py          # NetworkX graph builder + impact paths
+├── graph/
+│   ├── __init__.py          # Graph exports
+│   ├── state.py             # TypedDict schemas (data models)
+│   └── workflow.py          # LangGraph pipeline orchestration
+├── tests/
+│   ├── test_agents.py       # Unit tests for all agents
+│   └── test_production_api.py  # Mocked real-API integration tests
+├── main.py                  # CLI entry point
+├── requirements.txt         # Python dependencies
+├── .env.prod                # Environment variable template
+├── .gitignore
+└── README.md
 ```
 
 ---
 
 ## Future Enhancements
 
-- [ ] Neo4j database integration
-- [ ] LLM-powered reasoning (OpenAI/Claude)
+- [ ] Neo4j database integration (persistent graph storage)
+- [ ] LLM-powered reasoning (OpenAI / Claude)
 - [ ] FinBERT for financial sentiment
 - [ ] Real-time websocket updates
 - [ ] Web dashboard
@@ -338,42 +369,6 @@ GEOPOLITICAL KNOWLEDGE GRAPH ANALYSIS: NVIDIA
 
 ---
 
-## Troubleshooting
-
-### Test API Connection
-```bash
-python -c "
-from agents.news_agent import APIClient
-client = APIClient()
-try:
-    response = client.get('https://api.gdeltproject.org/api/v2/search/tv', 
-                         params={'query': 'NVIDIA', 'mode': 'artlist', 'format': 'json'})
-    print('✅ GDELT API working')
-except Exception as e:
-    print(f'❌ Error: {e}')
-"
-```
-
-### View Detailed Logs
-```bash
-# Set LOG_LEVEL=DEBUG in .env
-LOG_LEVEL=DEBUG python main.py --stock NVIDIA
-```
-
----
-
 ## License
 
-MIT License - Feel free to use and modify
-
----
-
-## Support
-
-For issues:
-1. Check `.env` configuration
-2. Verify API keys are valid
-3. Check internet connection
-4. Review logs in the output
-5. Run tests: `pytest -v`
-
+MIT License — free to use and modify.
