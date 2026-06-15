@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 # API Configuration
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
-NEWSAPI_URL = "https://newsapi.org/v2/everything"
-GDELT_URL = os.getenv("GDELT_BASE_URL", "https://api.gdeltproject.org/api/v2/search/tv")
+NEWSAPI_URL = "https://gnews.io/api/v4/search"
+GDELT_URL = os.getenv("GDELT_BASE_URL", "https://api.gdeltproject.org/api/v2/doc/doc")
 ACLED_URL = "https://api.acleddata.com/api/add-specific-filters"
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", 30))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", 3))
@@ -106,7 +106,7 @@ class APIClient:
 
 def fetch_from_newsapi(company: str, client: APIClient) -> list[NewsArticle]:
     """
-    Fetch news from NewsAPI.org
+    Fetch news from gnews.io
     
     Args:
         company: Company ticker/name
@@ -119,42 +119,38 @@ def fetch_from_newsapi(company: str, client: APIClient) -> list[NewsArticle]:
         NewsAPIError: If API call fails
     """
     if not NEWSAPI_KEY:
-        raise NewsAPIError("NEWSAPI_KEY not set in .env file. Get it from https://newsapi.org")
+        raise NewsAPIError("NEWSAPI_KEY not set in .env file. Get it from https://gnews.io")
     
     try:
-        # Build search query
-        search_query = f'"{company}" AND (geopolitical OR sanctions OR supply OR trade OR export OR China OR Taiwan OR government OR semiconductor)'
-        
         params = {
-            "q": search_query,
-            "sortBy": "publishedAt",
-            "pageSize": MAX_ARTICLES,
-            "language": "en",
-            "apiKey": NEWSAPI_KEY,
+            "q": company,
+            "lang": "en",
+            "max": MAX_ARTICLES,
+            "apikey": NEWSAPI_KEY,
         }
         
-        logger.info(f"Fetching from NewsAPI for: {company}")
+        logger.info(f"Fetching from gnews.io for: {company}")
         response = client.get(NEWSAPI_URL, params=params)
         
-        if response.get("status") != "ok":
-            raise NewsAPIError(f"NewsAPI error: {response.get('message', 'Unknown error')}")
+        if "articles" not in response:
+            raise NewsAPIError(f"gnews.io error: unexpected response format")
         
         articles: list[NewsArticle] = []
         for article in response.get("articles", [])[:MAX_ARTICLES]:
             articles.append({
                 "title": article.get("title", ""),
                 "content": article.get("description", ""),
-                "source": article.get("source", {}).get("name", "NewsAPI"),
+                "source": article.get("source", {}).get("name", "gnews.io"),
                 "date": article.get("publishedAt", ""),
                 "url": article.get("url", ""),
             })
         
-        logger.info(f"✅ NewsAPI: Retrieved {len(articles)} articles for {company}")
+        logger.info(f"✅ gnews.io: Retrieved {len(articles)} articles for {company}")
         return articles
         
     except Exception as e:
-        logger.error(f"❌ NewsAPI error: {str(e)}")
-        raise NewsAPIError(f"NewsAPI failed: {str(e)}")
+        logger.error(f"❌ gnews.io error: {str(e)}")
+        raise NewsAPIError(f"gnews.io failed: {str(e)}")
 
 
 def fetch_from_gdelt(company: str, client: APIClient) -> list[NewsArticle]:
@@ -194,9 +190,9 @@ def fetch_from_gdelt(company: str, client: APIClient) -> list[NewsArticle]:
             articles.append({
                 "title": article.get("title", ""),
                 "content": article.get("snippet", ""),
-                "source": article.get("sourceurl", "GDELT"),
-                "date": article.get("pubdate", ""),
-                "url": article.get("sourceurl", ""),
+                "source": article.get("sourcename", "GDELT"),
+                "date": article.get("seendate", article.get("date", "")),
+                "url": article.get("url", ""),
             })
         
         logger.info(f"✅ GDELT: Retrieved {len(articles)} events for {company}")
@@ -324,8 +320,18 @@ def fetch_news(state: AgentState) -> dict[str, Any]:
         all_articles = list(unique_articles.values())
         
         if not all_articles:
-            error_msg = " | ".join(errors) if errors else "No articles found"
-            raise NewsAPIError(f"No news articles retrieved: {error_msg}")
+            logger.warning(f"No news fetched for {stock}. Errors: {' | '.join(errors)}. Returning empty result.")
+            return {
+                **state,
+                "news": [],
+                "entities": [],
+                "graph_nodes": [],
+                "graph_edges": [],
+                "messages": [
+                    *(state.get("messages", [])),
+                    f"[NEWS_AGENT] No news fetched. Returning empty analysis."
+                ]
+            }
         
         logger.info(f"✅ Successfully fetched {len(all_articles)} unique articles for {stock}")
         

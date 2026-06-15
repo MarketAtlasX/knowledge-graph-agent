@@ -196,9 +196,7 @@ if __name__ == "__main__":
         # Export if requested
         if args.export:
             filepath = export_results(result, args.export)
-            print(f"✅ Results exported to: {filepath}")
-        else:
-            export_results(result)
+            print(f"Results exported to: {filepath}")
             
     except Exception as e:
         logger.error(f"Failed to run agent: {str(e)}", exc_info=True)
