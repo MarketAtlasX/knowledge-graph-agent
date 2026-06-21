@@ -15,6 +15,7 @@ Models Used:
 - TextBlob or VADER for sentiment analysis (optional FinBERT later)
 """
 
+import functools
 import logging
 from typing import Any
 import spacy
@@ -25,13 +26,16 @@ from graph.state import AgentState, Entity
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Load spaCy model
-try:
-    nlp = spacy.load("en_core_web_sm")
-    logger.info("spaCy model loaded successfully")
-except OSError:
-    logger.warning("spaCy model not found. Run: python -m spacy download en_core_web_sm")
-    nlp = None
+
+@functools.lru_cache(maxsize=1)
+def get_nlp():
+    try:
+        nlp = spacy.load("en_core_web_sm")
+        logger.info("spaCy model loaded successfully")
+        return nlp
+    except OSError:
+        logger.warning("spaCy model not found. Run: python -m spacy download en_core_web_sm")
+        return None
 
 
 def analyze_sentiment(text: str) -> str:
@@ -74,6 +78,7 @@ def extract_entities(text: str) -> list[dict[str, str]]:
         >>> any(e["entity"] == "China" for e in entities)
         True
     """
+    nlp = get_nlp()
     if nlp is None:
         logger.warning("spaCy model not loaded. Installing required packages...")
         return []
@@ -166,22 +171,3 @@ def process_event_intelligence(state: AgentState) -> dict[str, Any]:
         raise
 
 
-def get_geopolitical_keywords(entity_text: str) -> list[str]:
-    """
-    Extract geopolitical keywords from entity text.
-    
-    Args:
-        entity_text: Entity text to analyze
-        
-    Returns:
-        List of geopolitical keywords
-    """
-    geopolitical_keywords = [
-        "export", "import", "trade", "sanctions", "tensions",
-        "restrict", "ban", "war", "conflict", "policy",
-        "regulation", "control", "supply", "chain", "security",
-        "alliance", "cooperation", "dispute", "agreement"
-    ]
-    
-    text_lower = entity_text.lower()
-    return [kw for kw in geopolitical_keywords if kw in text_lower]

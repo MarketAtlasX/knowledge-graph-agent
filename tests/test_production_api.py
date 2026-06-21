@@ -4,11 +4,9 @@ Production test suite with API mocking for Geopolitical Knowledge Graph Intellig
 Tests ALL agents with mocked real APIs to ensure production readiness.
 """
 
-import os
 import pytest
-import json
 from unittest.mock import patch, MagicMock
-from graph.state import AgentState, NewsArticle, Entity, GraphNode, GraphEdge
+from graph.state import AgentState
 from agents.news_agent import (
     fetch_news, 
     fetch_from_newsapi, 
@@ -18,7 +16,7 @@ from agents.news_agent import (
     NewsAPIError
 )
 from agents.event_agent import process_event_intelligence, analyze_sentiment, extract_entities
-from agents.kg_agent import build_knowledge_graph, analyze_graph_impact
+from agents.kg_agent import build_knowledge_graph
 from graph.workflow import compile_workflow
 
 
@@ -90,7 +88,7 @@ MOCK_ACLED_RESPONSE = {
 class TestNewsAgentWithRealAPIs:
     """Test News Agent with mocked real APIs"""
     
-    @patch('agents.news_agent.NEWSAPI_KEY', 'test_key')
+    @patch('agents.news_agent.GNEWS_KEY', 'test_key')
     @patch('agents.news_agent.APIClient.get')
     def test_fetch_from_newsapi_success(self, mock_get):
         """Test successful NewsAPI fetch"""
@@ -132,9 +130,10 @@ class TestNewsAgentWithRealAPIs:
         """Test error handling when API key missing"""
         mock_getenv.return_value = None
         
-        with pytest.raises(NewsAPIError, match="NEWSAPI_KEY not set"):
+        with pytest.raises(NewsAPIError, match="GNEWS_KEY not set"):
             fetch_from_newsapi("NVIDIA", APIClient())
-    
+
+    @patch('agents.news_agent.GNEWS_KEY', 'test_key')
     @patch('agents.news_agent.fetch_from_newsapi')
     @patch('agents.news_agent.fetch_from_gdelt')
     def test_fetch_news_integration(self, mock_gdelt, mock_newsapi):
@@ -152,8 +151,8 @@ class TestNewsAgentWithRealAPIs:
         assert "news" in result
         assert len(result["news"]) >= 2
         assert result["stock"] == "NVIDIA"
-    
-    @patch('agents.news_agent.NEWSAPI_KEY', 'test_key')
+    @patch('agents.news_agent.GNEWS_KEY', 'test_key')
+
     @patch('agents.news_agent.fetch_from_newsapi')
     def test_api_retry_logic(self, mock_fetch):
         """Test retry logic for API failures is built-in"""

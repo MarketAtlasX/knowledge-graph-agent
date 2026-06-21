@@ -67,7 +67,7 @@ def create_workflow() -> StateGraph:
     return workflow
 
 
-def compile_workflow() -> any:
+def compile_workflow() -> "StateGraph":
     """
     Create and compile the workflow application.
     
@@ -83,4 +83,4 @@ def compile_workflow() -> any:
 if __name__ == "__main__":
     # For testing workflow creation
     app = compile_workflow()
-    print("✅ Workflow compiled successfully!")
+    print("Workflow compiled successfully!")

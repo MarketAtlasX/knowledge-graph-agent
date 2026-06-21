@@ -31,7 +31,7 @@ class AnalyzeCountryRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     service: str
-    newsapi_key_set: bool
+    gnews_key_set: bool
 
 
 @app.get("/health")
@@ -39,7 +39,7 @@ def health() -> HealthResponse:
     return HealthResponse(
         status="healthy",
         service="knowledge-graph-agent",
-        newsapi_key_set=bool(os.getenv("NEWSAPI_KEY")),
+        gnews_key_set=bool(os.getenv("GNEWS_KEY") or os.getenv("NEWSAPI_KEY")),
     )
 
 
